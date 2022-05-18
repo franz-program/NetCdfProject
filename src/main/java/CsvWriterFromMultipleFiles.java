@@ -1,29 +1,25 @@
 import org.apache.commons.csv.CSVFormat;
 import org.apache.commons.csv.CSVPrinter;
 
-import java.io.File;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
 import java.util.*;
+import java.util.concurrent.BlockingQueue;
+import java.util.concurrent.LinkedBlockingQueue;
+import java.util.concurrent.TimeUnit;
 
-public class CsvWriterFromMultipleFiles extends Thread implements AsynchronousTableWriter {
+public class CsvWriterFromMultipleFiles extends Thread implements NetcdfRowsManager {
 
-    private final Queue<Object[]> rowsQueue = new LinkedList<>();
-    private final List<String> activeFiles = new ArrayList<>();
+    private final BlockingQueue<Object[]> rowsQueue = new LinkedBlockingQueue<>();
+    private List<String> activeFiles;
+    private final List<String> filesWhichFailed = new ArrayList<>();
     private final InfoLogger infoLogger;
+    private final PostWritingPhaseManager postWritingPhaseManager;
 
-    private final String prefixCsvFilesName;
-    private final String csvFilePath;
+    private final String csvFileFullPath;
     private CSVPrinter printer;
     private String[] columnNames;
-
-    private int maximumNumberOfRowsPerFile = 50000;
-    private int currentNOfGeneratedFiles = 0;
-    private int nOfRowsCurrentOutputFile = 0;
-
-
-
 
     //TODO: aggiorna i messaggi d'errore per dire se uccidi tutto il processo oppure continui
 
@@ -42,87 +38,114 @@ public class CsvWriterFromMultipleFiles extends Thread implements AsynchronousTa
     private final String STARTED_WRITING_MSG = "The program started writing into csv(s)";
     private final LogLevel STARTED_WRITING_LOG_LVL = LogLevel.NORMAL;
 
+    private final String NEW_FILE_CREATED_MSG = "A new csv file (%s) has been created";
+    private final LogLevel NEW_FILE_CREATED_LOG_LVL = LogLevel.NORMAL;
+
     private final String NO_COLUMNS_NAMES_SET_MSG = "The program didn't set any column name"
             + PROCESS_WILL_CONTINUE_MSG;
     private final LogLevel NO_COLUMNS_NAMES_SET_LOG_LVL = LogLevel.WARNING;
 
+    private final String NO_FILE_NAME_WAS_SET_MSG = "The writer was started but no file name was set, procedure will abort";
+    private final LogLevel NO_FILE_NAME_WAS_SET_LOG_LVL = LogLevel.ERROR;
 
-    public CsvWriterFromMultipleFiles(List<String> activeFiles, InfoLogger infoLogger,
-                                      String prefixCsvFilesName, String csvFilePath) {
-        //TODO: devo copiarlo o posso lasciare lo stesso anche se questa classe cancella gli elementi?
-        Collections.copy(this.activeFiles, activeFiles);
+
+    public CsvWriterFromMultipleFiles(InfoLogger infoLogger,
+                                      String csvFileFullPath,
+                                      PostWritingPhaseManager postWritingPhaseManager) {
+
         this.infoLogger = infoLogger;
-
-        if (prefixCsvFilesName.endsWith(".csv"))
-            this.prefixCsvFilesName = prefixCsvFilesName;
-        else
-            this.prefixCsvFilesName = prefixCsvFilesName + ".csv";
-
-        this.csvFilePath = csvFilePath;
+        this.postWritingPhaseManager = postWritingPhaseManager;
+        this.csvFileFullPath = csvFileFullPath.endsWith(".csv") ?
+                csvFileFullPath : csvFileFullPath + ".csv";
 
     }
 
     @Override
-    public void startTask() {
-        this.start();
-    }
-
     public void run() {
+
+        if (activeFiles == null) {
+            infoLogger.log(NO_FILE_NAME_WAS_SET_MSG, NO_FILE_NAME_WAS_SET_LOG_LVL);
+            postWritingPhaseManager.notifyWritingHasFinished();
+            return;
+        }
 
         infoLogger.log(STARTED_WRITING_MSG, STARTED_WRITING_LOG_LVL);
 
-        if(Objects.isNull(columnNames)){
-            columnNames = new String[]{"no name was set for columns"};
+        if (columnNames == null) {
+            columnNames = new String[]{"no name was internally set for columns"};
             infoLogger.log(NO_COLUMNS_NAMES_SET_MSG, NO_COLUMNS_NAMES_SET_LOG_LVL);
         }
 
-        openNewCsvFile();
-
-        while (activeFiles.size() > 0) {
-            if (rowsQueue.size() > 0) {
-                writeRows();
-            }
-            //TODO: fare uno sleep?
+        try {
+            openCsvFile();
+        } catch (IOException e) {
+            postWritingPhaseManager.notifyWritingHasFinished();
+            return;
         }
+
+        while (activeFiles.size() > 0 || rowsQueue.size() > 0) {
+            writeRows();
+        }
+
+
         flushAndCloseCsvFile();
+
+        if (filesWhichFailed.size() > 0) {
+            //TODO:
+        }
+
+        postWritingPhaseManager.notifyWritingHasFinished();
+        return;
     }
 
     private void writeRows() {
 
-        while (true) {
+        while (rowsQueue.size() > 0) {
             try {
-                printer.printRecord(rowsQueue.remove());
-                nOfRowsCurrentOutputFile++;
 
-                if (nOfRowsCurrentOutputFile >= maximumNumberOfRowsPerFile)
-                    openNewCsvFile();
+                Object[] row = rowsQueue.poll(5, TimeUnit.SECONDS);
+                if (row != null)
+                    printer.printRecord(row);
 
             } catch (IOException e) {
-                //TODO: chiudo file e chiudo tutti i thread?
-                infoLogger.log(String.format(COULDNT_WRITE_ON_CSV_MSG, getCurrentCsvFileFullName()),
+                //TODO: chiudo file e notifico postWriterPhaseManager?
+                infoLogger.log(String.format(COULDNT_WRITE_ON_CSV_MSG, csvFileFullPath),
                         COULDNT_WRITE_ON_CSV_LOG_LVL);
-            } catch (NoSuchElementException e) {
-                break;
+            } catch (InterruptedException e) {
+                e.printStackTrace();
             }
         }
+
         return;
     }
 
-    public void writeRow(Object[] row) {
+    public void addRow(Object[] row) {
 
-        //TODO: serve synchronized?
-        synchronized (this) {
-            //TODO: da vedere il discorso coda piena
-            rowsQueue.add(row);
+        //TODO: c'è un modo più veloce della coda?
+
+        try {
+            rowsQueue.put(row);
+        } catch (InterruptedException e) {
+            e.printStackTrace();
         }
 
         return;
     }
 
-    public void sourceHasFinished(String fileName) {
+    private void openCsvFile() throws IOException {
 
-        activeFiles.remove(fileName);
-        //TODO: chiudo file?
+        infoLogger.log(String.format(NEW_FILE_CREATED_MSG, csvFileFullPath),
+                NEW_FILE_CREATED_LOG_LVL);
+
+        try {
+            printer = CSVFormat.DEFAULT.withHeader(columnNames).print(Files.newBufferedWriter(
+                    Paths.get(csvFileFullPath)
+            ));
+        } catch (IOException e) {
+            infoLogger.log(String.format(COULDNT_OPEN_CSV_MSG, csvFileFullPath),
+                    COULDNT_OPEN_CSV_LOG_LVL);
+            throw e;
+        }
 
         return;
     }
@@ -132,46 +155,23 @@ public class CsvWriterFromMultipleFiles extends Thread implements AsynchronousTa
         try {
             printer.flush();
         } catch (IOException e) {
-            //TODO: chiudo file e i thread?
-            infoLogger.log(String.format(COULDNT_WRITE_ON_CSV_MSG, getCurrentCsvFileFullName()),
+            //TODO: faccio notify del postWritingFileManager?
+            infoLogger.log(String.format(COULDNT_WRITE_ON_CSV_MSG, csvFileFullPath),
                     COULDNT_WRITE_ON_CSV_LOG_LVL);
         }
 
         try {
             printer.close();
         } catch (IOException e) {
-            //TODO: chiudo file e i thread?
-            infoLogger.log(String.format(COULDNT_CLOSE_CSV_MSG, getCurrentCsvFileFullName()),
+            //TODO: faccio notify del postWritingFileManager?
+            infoLogger.log(String.format(COULDNT_CLOSE_CSV_MSG, csvFileFullPath),
                     COULDNT_CLOSE_CSV_LOG_LVL);
         }
 
     }
 
-    private void openNewCsvFile() {
-
-        if (!Objects.isNull(printer)) {
-            flushAndCloseCsvFile();
-            nOfRowsCurrentOutputFile = 0;
-            currentNOfGeneratedFiles++;
-        }
-
-        //TODO: log
-
-        try {
-            printer = CSVFormat.DEFAULT.withHeader(columnNames).print(Files.newBufferedWriter(
-                    Paths.get(getCurrentCsvFileFullPath())
-            ));
-        } catch (IOException e) {
-            //TODO: chiudo file e i thread?
-            infoLogger.log(String.format(COULDNT_OPEN_CSV_MSG, getCurrentCsvFileFullName()),
-                    COULDNT_OPEN_CSV_LOG_LVL);
-        }
-        return;
-    }
-
-    public void setMaximumNumberOfRowsPerFile(int max) {
-        if (max >= 1)
-            nOfRowsCurrentOutputFile = max;
+    public void sourceHasFinished(String fileName) {
+        activeFiles.remove(fileName);
         return;
     }
 
@@ -180,13 +180,14 @@ public class CsvWriterFromMultipleFiles extends Thread implements AsynchronousTa
         this.columnNames = columnNames;
     }
 
-    private String getCurrentCsvFileFullName() {
-        return prefixCsvFilesName.substring(0, prefixCsvFilesName.length() - 4) + currentNOfGeneratedFiles + ".csv";
+    public void setSourceNames(List<String> fileNames) {
+        activeFiles = new ArrayList<>(fileNames);
     }
 
-    private String getCurrentCsvFileFullPath() {
-        return csvFilePath + File.separator + getCurrentCsvFileFullName();
+    public void sourceHasFailed(String fileName) {
+        filesWhichFailed.add(fileName);
+        sourceHasFinished(fileName);
     }
-    
+
 
 }

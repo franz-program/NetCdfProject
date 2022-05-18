@@ -9,7 +9,7 @@ public class InfoLoggerOnStdOutput implements InfoLogger{
 
     public void log(String msg, LogLevel level){
         if(level.isHigherOrEqualLevel(minimumLoggingLevel))
-            System.err.printf(STANDARD_LOG_FORMAT, java.time.LocalDate.now(), level.toString(), msg);
+            System.err.printf(STANDARD_LOG_FORMAT, java.time.LocalDateTime.now(), level.toString(), msg);
 
         return;
     }

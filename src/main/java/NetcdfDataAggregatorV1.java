@@ -1,9 +1,7 @@
-import ucar.nc2.NetcdfFile;
-import ucar.nc2.NetcdfFiles;
-
-import java.io.IOException;
 import java.util.ArrayList;
+import java.util.HashMap;
 import java.util.List;
+import java.util.Map;
 import java.util.concurrent.*;
 
 /*TODO: da progettare bene il discorso chiusura risorse, perchè alcune vanno chiuse quando termino tutto
@@ -12,167 +10,142 @@ alcune vanno chiuse come operazione standard, altre sono chiuse quando avvengono
 
 //TODO: quando faccio log stampo anche messaggio eccezzione?
 
+//TODO: da vedere se dò troppi callable/runnable all'executorService facendolo crashare
 
 public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
 
-    private final AsynchronousTableWriter asynchronousTableWriter;
+    private final NetcdfRowsManager asynchronousTableWriter;
     private final InfoLogger infoLogger;
+    private AsynchronousFailedFilesManager asynchronousFailedFilesManager;
+    private AsynchronousHeaderFileWriter asynchronousHeaderFileWriter;
 
-    private String[] netcdfFilesNames;
-    private final String headerFileName = "header.csv";
+    private List<String> netcdfFilesNames;
+    private List<String> failedPreprocessNetcdfFiles = new ArrayList<>();
 
     private ExecutorService executorService;
-    private final int nOfActiveThreads = Runtime.getRuntime().availableProcessors();
 
+    private final static String FILE_WONT_BE_PROCESSED_MSG = "The file %s will not be processed";
+    private final static LogLevel FILE_WONT_BE_PROCESSED_LOG_LVL = LogLevel.ERROR;
 
-    private final List<NetcdfFile> netcdfFiles = new ArrayList<>();
+    public NetcdfDataAggregatorV1(NetcdfRowsManager asynchronousTableWriter, InfoLogger infoLogger,
+                                  List<String> netcdfFilesNames, AsynchronousFailedFilesManager asynchronousFailedFilesManager,
+                                  AsynchronousHeaderFileWriter asynchronousHeaderFileWriter,
+                                  ExecutorService executorService) {
 
-    //VARIABLES FOR MESSAGES
-
-    private final String UNABLE_TO_OPEN_FILE_MSG = "The program was unable to open %s, shutting everything down";
-    private final LogLevel UNABLE_TO_OPEN_FILE_LOG_LVL = LogLevel.ERROR;
-
-    private final String UNABLE_TO_CLOSE_FILE_MSG = "The program was unable to close %s, shutting everything down";
-    private final LogLevel UNABLE_TO_CLOSE_FILE_LOG_LVL = LogLevel.ERROR;
-
-
-    public NetcdfDataAggregatorV1(AsynchronousTableWriter asynchronousTableWriter, InfoLogger infoLogger,
-                                  String[] netcdfFilesNames) {
         this.asynchronousTableWriter = asynchronousTableWriter;
         this.infoLogger = infoLogger;
-
         this.netcdfFilesNames = netcdfFilesNames;
+        this.asynchronousFailedFilesManager = asynchronousFailedFilesManager;
+        this.asynchronousHeaderFileWriter = asynchronousHeaderFileWriter;
+        this.executorService = executorService;
 
-        openNetcdfFiles();
     }
-
 
     @Override
     public void aggregate() {
 
-        performFirstCheck();
+        filterInvalidFiles();
 
-        executorService = Executors.newFixedThreadPool(nOfActiveThreads);
-        List<Callable<List<ColumnInfo>>> callablesForColumnInfo = createCallablesForColumnInfo();
-        List<ColumnInfo> dependentColumnsInfo = getDependentColumnsInfo(callablesForColumnInfo);
+        List<ColumnInfo> dependentColumnsInfo = getDependentColumnsInfo();
+        asynchronousHeaderFileWriter.setColumnsInfo(dependentColumnsInfo);
+        new Thread(asynchronousHeaderFileWriter).start();
+
+
+        asynchronousFailedFilesManager.setFailedFilesNames(failedPreprocessNetcdfFiles);
+        new Thread(asynchronousFailedFilesManager).start();
+
+
         String[] columnNames = getColumnNames(dependentColumnsInfo);
-        terminateExecutorService();
 
         asynchronousTableWriter.setColumnNames(columnNames);
-        asynchronousTableWriter.startTask();
+        asynchronousTableWriter.setSourceNames(netcdfFilesNames);
+        new Thread(asynchronousTableWriter).start();
 
+        startReadingNetcdfFiles(columnNames);
 
-        completeProgram();
     }
 
-    private void openNetcdfFiles() {
-        for (String fileName : netcdfFilesNames) {
-            try {
-                netcdfFiles.add(NetcdfFiles.open(fileName));
-            } catch (IOException e) {
-                infoLogger.log(String.format(UNABLE_TO_OPEN_FILE_MSG, fileName), UNABLE_TO_OPEN_FILE_LOG_LVL);
-                //TODO: chiudo tutto?
-            }
-        }
-    }
+    private void filterInvalidFiles() {
 
-
-    private void completeProgram() {
-        closeResources();
-    }
-
-
-    private void closeResources() {
-        closeNetcdfFiles();
-        terminateExecutorService();
-
-        //meglio chiudere il logger per ultimo
-        infoLogger.close();
-        System.exit(0);
-        //TODO: va bene system exit per fermare il thread?
-    }
-
-
-    private void closeNetcdfFiles() {
-        for (NetcdfFile netcdfFile : netcdfFiles) {
-            try {
-                netcdfFile.close();
-            } catch (IOException e) {
-                infoLogger.log(String.format(UNABLE_TO_CLOSE_FILE_MSG, netcdfFile.getLocation())
-                        , UNABLE_TO_CLOSE_FILE_LOG_LVL);
-                //TODO: cosa faccio? il metodo lo chiamo solo da closeResources()? Se si, allora non faccio nulla in questo catch?
-            }
-        }
-    }
-
-
-    //TODO: vedi come fare per executorService
-
-    private void terminateExecutorService() {
-        if (executorService != null)
-            executorService.shutdown();
-    }
-
-    private List<Callable<Boolean>> createCallablesForFirstCheck() {
-        List<Callable<Boolean>> callables = new ArrayList<>();
-
-        for (NetcdfFile netcdfFile : netcdfFiles)
-            callables.add(NetcdfFileCheckerCreator.createFileChecker(netcdfFile, infoLogger));
-
-        return callables;
-    }
-
-    private List<Callable<List<ColumnInfo>>> createCallablesForColumnInfo() {
-        List<Callable<List<ColumnInfo>>> callables = new ArrayList<>();
-
-        for (NetcdfFile netcdfFile : netcdfFiles)
-            callables.add(DepVariablesInfoGetterCreator.createVariablesInfoGetter(netcdfFile));
-
-        return callables;
-    }
-
-    private void performFirstCheck() {
-        boolean firstCheckPassed = true;
-        List<Callable<Boolean>> callables = createCallablesForFirstCheck();
-        executorService = Executors.newFixedThreadPool(nOfActiveThreads);
-
-        //TODO: metto uno sleep usando future.isDone() invece che get?
-        //TODO: da capire cosa causa InterruptedException
+        Map<String, Future<Boolean>> futureMap = createFutureMapForFirstCheck();
 
         try {
-            List<Future<Boolean>> futures = executorService.invokeAll(callables);
-            for (Future<Boolean> future : futures)
-                if (!future.get())
-                    firstCheckPassed = false;
 
-        } catch (InterruptedException | ExecutionException e) {
+            for (Map.Entry<String, Future<Boolean>> pair : futureMap.entrySet()) {
+                try {
+                    processTestedFile(pair.getValue().get(), pair.getKey());
+                } catch (ExecutionException e) {
+                    processTestedFile(false, pair.getKey());
+                }
+            }
+
+        } catch (InterruptedException e) {
             infoLogger.log(e.toString(), LogLevel.ERROR);
-            firstCheckPassed = false;
+            //TODO: quando avviene?
+            //TODO: cosa faccio?
+        }
+    }
+
+    private Map<String, Future<Boolean>> createFutureMapForFirstCheck() {
+        //TODO: qual è la migliore implementazione?
+        Map<String, Future<Boolean>> map = new HashMap<>();
+
+        for (String netcdfFileName : netcdfFilesNames)
+            map.put(netcdfFileName, executorService.submit(NetcdfFileCheckerCreator.create(netcdfFileName, infoLogger)));
+
+        return map;
+    }
+
+    private void processTestedFile(boolean testResult, String fileFullPath) {
+        if (!testResult) {
+            netcdfFilesNames.remove(fileFullPath);
+            infoLogger.log(String.format(FILE_WONT_BE_PROCESSED_MSG, fileFullPath), FILE_WONT_BE_PROCESSED_LOG_LVL);
+            failedPreprocessNetcdfFiles.add(fileFullPath);
+        }
+    }
+
+    private List<ColumnInfo> getDependentColumnsInfo() {
+
+        Map<String, Future<List<ColumnInfo>>> futureMap = createFutureMapForColumnInfo();
+        List<ColumnInfo> globalColumnsInfo = new ArrayList<>();
+
+        try {
+            for (Map.Entry<String, Future<List<ColumnInfo>>> pair : futureMap.entrySet()) {
+                try {
+                    addElementsIfNotPresent(globalColumnsInfo, pair.getValue().get());
+                } catch (ExecutionException e) {
+                    //TODO: occhio ripetizione di codice
+                    String fileFullPath = pair.getKey();
+                    netcdfFilesNames.remove(fileFullPath);
+                    infoLogger.log(String.format(FILE_WONT_BE_PROCESSED_MSG, fileFullPath), FILE_WONT_BE_PROCESSED_LOG_LVL);
+                    failedPreprocessNetcdfFiles.add(fileFullPath);
+                }
+            }
+        } catch (InterruptedException e) {
+            infoLogger.log(e.toString(), LogLevel.ERROR);
+            //TODO: quando avviene?
+            //TODO: cosa faccio?
         }
 
-        if (!firstCheckPassed) {
-            closeResources();
-        }
-
-        terminateExecutorService();
+        return globalColumnsInfo;
 
     }
 
-    private List<ColumnInfo> getDependentColumnsInfo(List<Callable<List<ColumnInfo>>> callables) {
-        List<ColumnInfo> columnsInfo = new ArrayList<>();
+    private Map<String, Future<List<ColumnInfo>>> createFutureMapForColumnInfo() {
+        //TODO: qual è la migliore implementazione?
+        Map<String, Future<List<ColumnInfo>>> map = new HashMap<>();
 
-        try {
-            List<Future<List<ColumnInfo>>> futures = executorService.invokeAll(callables);
-            for (Future<List<ColumnInfo>> future : futures) {
-                for (ColumnInfo columnInfo : future.get())
-                    if (!columnsInfo.contains(columnInfo))
-                        columnsInfo.add(columnInfo);
-            }
-        } catch (InterruptedException | ExecutionException e) {
-            //TODO:
+        for (String netcdfFileName : netcdfFilesNames)
+            map.put(netcdfFileName, executorService.submit(DepVariablesInfoGetterCreator.create(netcdfFileName, infoLogger)));
 
+        return map;
+    }
+
+    private void addElementsIfNotPresent(List<ColumnInfo> listWhereToAdd, List<ColumnInfo> listToCheck) {
+        for (ColumnInfo columnInfo : listToCheck) {
+            if (!listWhereToAdd.contains(columnInfo))
+                listWhereToAdd.add(columnInfo);
         }
-        return columnsInfo;
     }
 
     private String[] getColumnNames(List<ColumnInfo> dependentColumnsInfo) {
@@ -184,11 +157,24 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
         columnNames[2] = ClassForCostants.latVarName;
         columnNames[3] = ClassForCostants.lonVarName;
 
-        for (int i = 4; i < depNames.length; i++) {
+        for (int i = 4; i < columnNames.length; i++) {
             columnNames[i] = depNames[i - 4];
         }
         return columnNames;
     }
 
+    private void startReadingNetcdfFiles(String[] columnNames) {
+
+        for (String fileName : netcdfFilesNames)
+            executorService.execute(NetcdfRowsSenderCreator.create(asynchronousTableWriter, columnNames, fileName,
+                    infoLogger));
+
+        terminateExecutorService();
+    }
+
+    private void terminateExecutorService() {
+        if (executorService != null)
+            executorService.shutdown();
+    }
 
 }

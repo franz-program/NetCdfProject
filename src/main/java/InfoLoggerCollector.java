@@ -1,11 +1,8 @@
-import java.util.ArrayList;
-import java.util.List;
-
 public class InfoLoggerCollector implements InfoLogger{
 
-    private List<InfoLogger> loggers;
+    private InfoLogger[] loggers;
 
-    public InfoLoggerCollector(List<InfoLogger> loggers){
+    public InfoLoggerCollector(InfoLogger[] loggers){
         this.loggers = loggers;
     }
 
