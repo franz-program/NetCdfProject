@@ -10,35 +10,28 @@ public class Main {
     //TODO: aggiorna gli indirizzi hardcoded
     //TODO: aggiungi un blocco del programma nel main se alcune ipotesi fondamentali falliscono
 
-    private final static int nOfActiveThreads = Runtime.getRuntime().availableProcessors() - 1;
-
     public static void main(String[] args) {
 
-        List<String> ncFileNames;
+        System.out.println("Remember to set correctly the maxHeapSize");
+
+        List<String> ncFilesPaths;
         String outputFileFullPath;
         String headerFileFullPath;
+        String[] variablesNames;
 
-        if (args.length < 1)
-            ncFileNames = getNcFilesNames("D:\\UNIVERSITA'\\TESI\\configFile.txt");
-        else
-            ncFileNames = getNcFilesNames(args[0]);
-
-        if(args.length < 2)
-            outputFileFullPath = getOutputFileFullPath();
-        else
-            outputFileFullPath = args[1];
-
-        if(args.length < 3)
-            headerFileFullPath = getHeaderFileFullPath();
-        else
-            headerFileFullPath = args[2];
-
+        ncFilesPaths = getNcFilesPaths(args.length < 1 ? getConfigFileFullPath() : args[0]);
+        outputFileFullPath = args.length < 2 ? getOutputFileFullPath() : args[1];
+        headerFileFullPath = args.length < 3 ? getHeaderFileFullPath() : args[2];
+        variablesNames = getVariablesNames(args.length < 4 ? get4DNamesConfigFileFullPath() : args[3]);
 
         InfoLogger logCollector = new InfoLoggerCollector(instantiateLoggers());
 
-        AsynchronousHeaderFileWriter asynchronousHeaderFileWriter = new AsynchronousHeaderCsvWriter(logCollector,
-                headerFileFullPath);
+        HeaderFileWriter headerFileWriter = new HeaderCsvWriter(logCollector, headerFileFullPath);
 
+
+        int nOfActiveThreads = PoolSizeCalculator.getPoolSize(ncFilesPaths, logCollector);
+        nOfActiveThreads = Math.min(nOfActiveThreads, ncFilesPaths.size());
+        //nOfActiveThreads = 1;
         ExecutorService executorService = Executors.newFixedThreadPool(nOfActiveThreads);
 
         //TODO: VA BENE?
@@ -47,37 +40,52 @@ public class Main {
         PostWritingPhaseManager postWritingPhaseManager = (PostWritingPhaseManager) temporaryPostWritingPhaseManager;
         //
 
+        AsynchronousOutputFileWriter outputFileWriter = new CsvWriterFromData(logCollector, outputFileFullPath,
+                postWritingPhaseManager, ncFilesPaths, variablesNames,
+                headerFileWriter, true);
+        new Thread(outputFileWriter).start();
 
-        AsynchronousFailedFilesManager asynchronousFailedFilesManager = new FailedFilesPrinter(logCollector);
+        AsynchronousFailedFilesManager asynchronousFailedFilesManager = new FailedFilesPrinter(logCollector, outputFileWriter);
+        new Thread(asynchronousFailedFilesManager).start();
 
-        NetcdfRowsManager asynchronousTableWriter = new CsvWriterFromMultipleFiles(logCollector, outputFileFullPath,
-                postWritingPhaseManager);
+        AsynchronousFilesValidityCollector asynchronousFilesValidityCollector = new InvalidFilesPrinter(logCollector, outputFileWriter);
+        new Thread(asynchronousFilesValidityCollector).start();
 
+        startExecutingReaders(ncFilesPaths, executorService, outputFileWriter, variablesNames,
+                logCollector, asynchronousFilesValidityCollector, asynchronousFailedFilesManager, headerFileWriter);
 
-        NetcdfDataAggregator netcdfDataAggregator = new NetcdfDataAggregatorV1(asynchronousTableWriter, logCollector,
-                ncFileNames, asynchronousFailedFilesManager, asynchronousHeaderFileWriter,
-                executorService);
-
-        netcdfDataAggregator.aggregate();
     }
 
     private static InfoLogger[] instantiateLoggers() {
 
         InfoLogger[] loggers = new InfoLogger[2];
-        String[] logFileInfo = getLogFileFolderAndName();
-        loggers[0] = new InfoLoggerOnTxtFile(logFileInfo[0], logFileInfo[1]);
+        loggers[0] = new InfoLoggerOnTxtFile(getLogFileFullPath());
         loggers[1] = new InfoLoggerOnStdOutput(LogLevel.WARNING);
 
         return loggers;
     }
 
-    private static String[] getLogFileFolderAndName() {
-        //folder = pos 0
-        //name = pos 1
-        return new String[]{"D:\\UNIVERSITA'\\TESI\\other files folder", "logFileName.txt"};
+    private static String getLogFileFullPath() {
+        return "D:\\UNIVERSITA'\\TESI\\generated files folder\\logFileName.txt";
     }
 
-    private static List<String> getNcFilesNames(String configFileFullPath) {
+    private static String getConfigFileFullPath() {
+        return "D:\\UNIVERSITA'\\TESI\\config files\\netcdfListConfigFile.txt";
+    }
+
+    private static String getHeaderFileFullPath() {
+        return "D:\\UNIVERSITA'\\TESI\\generated files folder\\headerFile.csv";
+    }
+
+    private static String getOutputFileFullPath() {
+        return "D:\\UNIVERSITA'\\TESI\\generated files folder\\outputFileName.csv";
+    }
+
+    private static String get4DNamesConfigFileFullPath() {
+        return "D:\\UNIVERSITA'\\TESI\\config files\\4DVariablesNames.txt";
+    }
+
+    private static List<String> getNcFilesPaths(String configFileFullPath) {
 
         BufferedReader bufferedReader;
         List<String> fileNames = new ArrayList<>();
@@ -91,10 +99,11 @@ public class Main {
 
         String line;
         while (true) {
+
             try {
                 line = bufferedReader.readLine();
             } catch (IOException e) {
-                throw new RuntimeException("Could not read file");
+                throw new RuntimeException("Could not read config file");
             }
 
             if (Objects.isNull(line))
@@ -123,13 +132,60 @@ public class Main {
         return;
     }
 
-    private static String getHeaderFileFullPath() {
-        return "D:\\UNIVERSITA'\\TESI\\other files folder\\headerFile.csv";
+    private static String[] getVariablesNames(String filePathContaining4DVarNames) {
+        String[] indepVarsNames = new String[]{ClassForCostants.depthVarName,
+                ClassForCostants.latVarName, ClassForCostants.lonVarName};
+        String[] depVarsNames = get4DVariablesNamesFromTxtFile(filePathContaining4DVarNames);
+
+        String[] varsNames = new String[indepVarsNames.length + depVarsNames.length];
+        System.arraycopy(indepVarsNames, 0, varsNames, 0, indepVarsNames.length);
+        System.arraycopy(depVarsNames, 0, varsNames, indepVarsNames.length, depVarsNames.length);
+
+        return varsNames;
     }
 
-    private static String getOutputFileFullPath() {
-        return "D:\\UNIVERSITA'\\TESI\\output file folder\\outputFileName.csv";
+    private static String[] get4DVariablesNamesFromTxtFile(String filePathContaining4DVarNames) {
+        BufferedReader bufferedReader;
+        List<String> varNames = new ArrayList<>();
+
+        try {
+            bufferedReader = new BufferedReader(new FileReader(filePathContaining4DVarNames));
+        } catch (FileNotFoundException e) {
+            throw new RuntimeException("File containing 4D variables names not found");
+        }
+
+        String line;
+        while (true) {
+
+            try {
+                line = bufferedReader.readLine();
+            } catch (IOException e) {
+                throw new RuntimeException("Could not read 4D var names file");
+            }
+
+            if (Objects.isNull(line))
+                break;
+
+            line = line.trim();
+
+            if (line.length() == 0)
+                continue;
+
+            varNames.add(line);
+        }
+
+        return varNames.toArray(String[]::new);
     }
 
+    private static void startExecutingReaders(List<String> fileFullPaths, ExecutorService executorService, AsynchronousOutputFileWriter outputFileWriter,
+                                              String[] columnsNames, InfoLogger infoLogger,
+                                              AsynchronousFilesValidityCollector filesValidityCollector,
+                                              AsynchronousFailedFilesManager failedFilesManager, HeaderFileWriter headerFileWriter) {
+
+        for (String filePath : fileFullPaths)
+            executorService.execute(NetcdfDataReaderCreator.create(outputFileWriter, columnsNames, filePath, infoLogger,
+                    filesValidityCollector, failedFilesManager, headerFileWriter));
+
+    }
 
 }

@@ -41,8 +41,6 @@ public class ResourceCloser extends Thread implements PostWritingPhaseManager {
 
     private void killExecutorServiceAndTasks() {
         executorService.shutdown();
-        //TODO: vedere se va bene
-        executorService.shutdownNow();
     }
 
 

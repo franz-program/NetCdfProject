@@ -7,8 +7,8 @@ public class NetcdfFileCheckerCreator {
     private NetcdfFileCheckerCreator() {
     }
 
-    public static Callable<Boolean> create(String netcdfFileName, InfoLogger infoLogger) {
-        return new NetcdfFileChecker(netcdfFileName, infoLogger);
+    public static Callable<Boolean> create(NetcdfFile netcdfFile) {
+        return new NetcdfFileChecker(netcdfFile);
     }
 
 }

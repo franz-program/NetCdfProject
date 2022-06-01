@@ -4,11 +4,11 @@ import org.apache.commons.csv.CSVPrinter;
 import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Paths;
+import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Objects;
 
-public class AsynchronousHeaderCsvWriter implements AsynchronousHeaderFileWriter {
+public class HeaderCsvWriter implements HeaderFileWriter {
 
     private List<ColumnInfo> columnsInfo;
 
@@ -36,23 +36,25 @@ public class AsynchronousHeaderCsvWriter implements AsynchronousHeaderFileWriter
             "%n*******************%n**************";
     private final LogLevel PRINT_ON_LOG_LOG_LVL = LogLevel.WARNING;
 
-
-    public AsynchronousHeaderCsvWriter(InfoLogger infoLogger, String headerFileFullPath) {
+    public HeaderCsvWriter(InfoLogger infoLogger, String headerFileFullPath) {
         this.infoLogger = infoLogger;
         this.headerFileFullPath = headerFileFullPath + (headerFileFullPath.endsWith(".csv") ? "" : ".csv");
+        columnsInfo = new ArrayList<>();
     }
 
     @Override
-    public void setColumnsInfo(List<ColumnInfo> columnsInfo) {
-        this.columnsInfo = columnsInfo;
+    public void addColumnsInfo(List<ColumnInfo> columnsInfo) {
+        addElementsIfNotPresent(this.columnsInfo, columnsInfo);
     }
 
-    public void run() {
-
-        if (Objects.isNull(columnsInfo)) {
-            infoLogger.log(NO_COLUMN_INFO_SET_MSG, NO_COLUMN_INFO_SET_LOG_LVL);
-            return;
+    private void addElementsIfNotPresent(List<ColumnInfo> listWhereToAdd, List<ColumnInfo> listToCheck) {
+        for (ColumnInfo columnInfo : listToCheck) {
+            if (!listWhereToAdd.contains(columnInfo))
+                listWhereToAdd.add(columnInfo);
         }
+    }
+
+    public void startWriting() {
 
         try {
             printer = CSVFormat.DEFAULT.withHeader(ColumnInfo.getKindOfInfo()).print(Files.newBufferedWriter(
@@ -95,7 +97,6 @@ public class AsynchronousHeaderCsvWriter implements AsynchronousHeaderFileWriter
             infoLogger.log(String.format(COULDNT_CLOSE_CSV_MSG, headerFileFullPath),
                     COULDNT_CLOSE_CSV_LOG_LVL);
             throw e;
-            //TODO: lascio aperto?
         }
 
     }

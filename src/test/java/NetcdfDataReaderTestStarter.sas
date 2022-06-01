@@ -1,7 +1,7 @@
 import java.io.File;
 import java.io.IOException;
 
-public class RowsSenderTesterStarter {
+public class NetcdfDataReaderTestStarter {
 
     public static void main(String[] args) {
         UselessInfoLogger uselessInfoLogger = new UselessInfoLogger();
@@ -21,11 +21,10 @@ public class RowsSenderTesterStarter {
             return;
         }
 
-        NetcdfRowsManager netcdfRowsManager = new RowsSenderTester(fileFullPath);
-        netcdfRowsManager.setColumnNames(columnNames);
+        NetcdfDataReaderTester fileWriter = new NetcdfDataReaderTester(fileFullPath, columnNames);
 
-        new Thread(netcdfRowsManager).start();
-        new Thread(NetcdfRowsSenderCreator.create(netcdfRowsManager, columnNames, fileFullPath, uselessInfoLogger)).start();
+        new Thread(fileWriter).start();
+        new Thread(NetcdfDataReaderCreator.create(fileWriter, columnNames, fileFullPath, uselessInfoLogger, fileWriter, fileWriter, fileWriter)).start();
 
     }
 

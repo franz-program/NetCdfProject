@@ -7,14 +7,15 @@ import java.io.IOException;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
+import java.util.NoSuchElementException;
 
-public class RowsSenderTester implements NetcdfRowsManager {
+public class NetcdfDataReaderTester implements AsynchronousOutputFileWriter, AsynchronousFilesValidityCollector, AsynchronousFailedFilesManager, HeaderFileWriter {
 
     private String fileFullPath;
 
     private String[] columnNames;
     private final int[][][] rowsCountmap;
-    private List<Object[]> receivedRows = new ArrayList<>();
+    private DataGetter receivedData;
 
     private int depthIndexInRow;
     private int latIndexInRow;
@@ -25,15 +26,16 @@ public class RowsSenderTester implements NetcdfRowsManager {
     private boolean failedReading = false;
     private boolean testPassed = true;
 
-    public RowsSenderTester(String fileFullPath) {
+    public NetcdfDataReaderTester(String fileFullPath, String[] columnNames) {
         this.fileFullPath = fileFullPath;
+        this.columnNames = columnNames;
         rowsCountmap = new int[NetcdfTestFilesCreator.DEPTH_DIM_LENGTH][NetcdfTestFilesCreator.LAT_DIM_LENGTH][NetcdfTestFilesCreator.LON_DIM_LENGTH];
+        initializeRowIndexes();
     }
 
     @Override
-    public void addRow(Object... row) {
-        receivedRows.add(row);
-        incrementCountmap(row);
+    public void addDataGetter(DataGetter dataGetter) {
+        receivedData = dataGetter;
     }
 
     private void modifyCountmap(Object[] row, int step) {
@@ -43,18 +45,11 @@ public class RowsSenderTester implements NetcdfRowsManager {
 
         rowsCountmap[depthValue][latValue][lonValue] += step;
 
-        if (step == 1)//DEBUG
-            System.out.printf("Received %d %d %d\n", depthValue, latValue, lonValue);
-
         return;
     }
 
     private void incrementCountmap(Object[] row) {
         modifyCountmap(row, 1);
-    }
-
-    private void decrementCountmap(Object[] row) {
-        modifyCountmap(row, -1);
     }
 
     @Override
@@ -63,20 +58,6 @@ public class RowsSenderTester implements NetcdfRowsManager {
             failedReading = false;
             this.notify();
         }
-    }
-
-    @Override
-    public void sourceHasFailed(String sourceName) {
-        synchronized (this) {
-            failedReading = true;
-            this.notify();
-        }
-    }
-
-    @Override
-    public void setColumnNames(String[] columnsNames) {
-        this.columnNames = columnsNames;
-        initializeRowIndexes();
     }
 
     private void initializeRowIndexes() {
@@ -97,9 +78,6 @@ public class RowsSenderTester implements NetcdfRowsManager {
             return;
         }
 
-        if (!preCheckCountMap())
-            testPassed = false;
-
         try {
             readRowsFromFileAndCompare();
         } catch (IOException e) {
@@ -107,13 +85,12 @@ public class RowsSenderTester implements NetcdfRowsManager {
             return;
         }
 
-        postCheckCountmap();
+        checkCountmap();
 
         if (testPassed)
             System.out.println("Class seems working fine");
         else
             System.out.println("Class seems not working correctly");
-
 
     }
 
@@ -126,45 +103,16 @@ public class RowsSenderTester implements NetcdfRowsManager {
         }
     }
 
-    private boolean preCheckCountMap() {
-
-        boolean emptyCell = false;
-        boolean overflowedCell = false;
-
-        for (int[][] matrix : rowsCountmap)
-            for (int[] row : matrix)
-                for (int count : row) {
-                    if (count == 0)
-                        emptyCell = true;
-                    else if (count > 1)
-                        overflowedCell = true;
-                }
-
-        if (emptyCell)
-            System.out.println("There is some element not received");
-
-        if (overflowedCell)
-            System.out.println("There is some element received multiple times");
-
-        return !emptyCell && !overflowedCell;
-
-    }
-
-    private void postCheckCountmap() {
-
-        boolean emptyCell = false;
+    private void checkCountmap() {
 
         for (int[][] matrix : rowsCountmap)
             for (int[] row : matrix)
                 for (int count : row)
-                    if (count != 0)
-                        emptyCell = true;
-
-        if (emptyCell && testPassed) {
-            System.out.println("The received list is INCONSISTENT");
-        }
-        testPassed = false;
-
+                    if (count != 1) {
+                        testPassed = false;
+                        return;
+                    }
+        return;
     }
 
     private void readRowsFromFileAndCompare() throws IOException {
@@ -176,9 +124,19 @@ public class RowsSenderTester implements NetcdfRowsManager {
         ArrayFloat.D4 var1Data = getDataOf4DVariable(netcdfFile.findVariable(NetcdfTestFilesCreator.var1TestName));
         ArrayFloat.D4 var2Data = getDataOf4DVariable(netcdfFile.findVariable(NetcdfTestFilesCreator.var2TestName));
 
+        receivedData.readFromBeginning();
+
         System.out.println("ROWS FROM LIST:");
 
-        for (Object[] row : receivedRows) {
+        while (true) {
+
+            Object[] row;
+            try {
+                row = receivedData.getNextRow();
+            } catch (NoSuchElementException e) {
+                break;
+            }
+
             int depthFileIndex = (int) ((float) row[depthIndexInRow]);
             int latFileIndex = (int) ((float) row[latIndexInRow]);
             int lonFileIndex = (int) ((float) row[lonIndexInRow]);
@@ -187,9 +145,7 @@ public class RowsSenderTester implements NetcdfRowsManager {
                 testPassed = false;
                 wrongRowFound = true;
             }
-            //DEBUG
-            System.out.printf("RIGA: %d, %d, %d %f %f\n", depthFileIndex, latFileIndex, lonFileIndex, (float) row[var1IndexInRow], (float) row[var2IndexInRow]);
-            decrementCountmap(row);
+            incrementCountmap(row);
         }
 
         if (wrongRowFound)
@@ -210,8 +166,22 @@ public class RowsSenderTester implements NetcdfRowsManager {
 
 
     @Override
-    public void setSourceNames(List<String> sourceNames) {
-        return;
+    public void setFailedFile(String filePath) {
+
     }
 
+    @Override
+    public void setFileValidity(String filename, boolean isValid) {
+
+    }
+
+    @Override
+    public void addColumnsInfo(List<ColumnInfo> columnsInfo) {
+
+    }
+
+    @Override
+    public void startWriting() {
+
+    }
 }

@@ -1,4 +1,3 @@
-import org.checkerframework.checker.units.qual.C;
 import ucar.ma2.Array;
 import ucar.ma2.DataType;
 import ucar.ma2.Index4D;
@@ -6,7 +5,6 @@ import ucar.ma2.InvalidRangeException;
 import ucar.nc2.Dimension;
 import ucar.nc2.NetcdfFileWriter;
 import ucar.nc2.Variable;
-
 
 import java.io.IOException;
 import java.util.ArrayList;
@@ -19,7 +17,7 @@ public class NetcdfTestFilesCreator {
     public final static String var2TestName = "Var2";
 
     public final static int TIME_DIM_LENGTH = 1;
-    public final static int DEPTH_DIM_LENGTH = 5;
+    public final static int DEPTH_DIM_LENGTH = 50;
     public final static int LAT_DIM_LENGTH = 6;
     public final static int LON_DIM_LENGTH = 12;
 

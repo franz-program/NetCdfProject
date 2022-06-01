@@ -3,19 +3,22 @@ import au.com.bytecode.opencsv.CSVReader;
 import java.io.*;
 import java.util.*;
 
-public class WholeSystemTester {
+public class WritingOnOutputFileTester {
 
-    private static String testFilesFolder = "D:\\UNIVERSITA'\\TESI\\folder for testing the system";
-    private static String configFileName = "configFileForTest.txt";
-    private static String outputFileName = "outputFileForTest.csv";
-    private static String headerFileName = "headerFileForTest.csv";
+    private static String testFilesFolder = "D:\\UNIVERSITA'\\TESI\\folderForTestingTheSystem";
+    private static final String configFileNameForNetcdfPaths = "inputFilesListsForTest.txt";
+    private static final String configFileNameFor4DVars = "4DVarsNames.txt";
+    private static final String outputFileName = "outputFileForTest.csv";
+    private static final String headerFileName = "headerFileForTest.csv";
 
-    private static String netcdfTestFilesPrefix = "testFile";
-    private static int nOfNetcdfTestFiles = 5;
-    private static String[] netcdfTestFilesNames = inizializeNetcdfFilesNames();
-
+    private static final String netcdfTestFilesPrefix = "testFile";
+    private static final int nOfNetcdfTestFiles = 5;
+    private static final String[] netcdfTestFilesNames = inizializeNetcdfFilesNames();
+    private static int[][][][] countMap;
 
     public static void main(String[] args) {
+
+        countMap = new int[nOfNetcdfTestFiles][NetcdfTestFilesCreator.DEPTH_DIM_LENGTH][NetcdfTestFilesCreator.LAT_DIM_LENGTH][NetcdfTestFilesCreator.LON_DIM_LENGTH];
 
         if (args.length <= 0)
             throw new IllegalArgumentException("Put any folder's path for the test files, as the first argument (no last separator needed)");
@@ -32,18 +35,14 @@ public class WholeSystemTester {
         if (outputFile.exists() && !outputFile.delete())
             throw new RuntimeException("Couldn't clear the old output file, test won't proceed");
 
-        writeOnConfigFile();
+        writeListInputFiles();
+        write4DVarsNamesOnFile();
         writeNetcdfFiles();
 
-        Main.main(new String[]{testFilesFolder + File.separator + configFileName,
+        Main.main(new String[]{testFilesFolder + File.separator + configFileNameForNetcdfPaths,
                 testFilesFolder + File.separator + outputFileName,
-                testFilesFolder + File.separator + headerFileName});
-
-        try {
-            Thread.sleep(10000);
-        } catch (InterruptedException e) {
-            e.printStackTrace();
-        }
+                testFilesFolder + File.separator + headerFileName,
+                testFilesFolder + File.separator + configFileNameFor4DVars});
 
         if (runningOnWindows)
             waitUntilOutputFileIsClosed();
@@ -64,13 +63,23 @@ public class WholeSystemTester {
         return temp;
     }
 
-    private static void writeOnConfigFile() {
-        try (BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(testFilesFolder + File.separator + configFileName))) {
+    private static void writeListInputFiles() {
+        try (BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(testFilesFolder + File.separator + configFileNameForNetcdfPaths))) {
             for (String name : netcdfTestFilesNames)
                 bufferedWriter.write(String.format("%s%n", testFilesFolder + File.separator + name));
         } catch (IOException e) {
             e.printStackTrace();
-            throw new RuntimeException("Unable to write the config file, test won't proceed");
+            throw new RuntimeException("Unable to write the config file for input files list, test won't proceed");
+        }
+    }
+
+    private static void write4DVarsNamesOnFile() {
+        try (BufferedWriter bufferedWriter = new BufferedWriter(new FileWriter(testFilesFolder + File.separator + configFileNameFor4DVars))) {
+            bufferedWriter.write(String.format("%s%n", NetcdfTestFilesCreator.var1TestName));
+            bufferedWriter.write(String.format("%s", NetcdfTestFilesCreator.var2TestName));
+        } catch (IOException e) {
+            e.printStackTrace();
+            throw new RuntimeException("Unable to write the config file for 4D vars names, test won't proceed");
         }
     }
 
@@ -110,17 +119,38 @@ public class WholeSystemTester {
                 float generatedVar1Value = NetcdfTestFilesCreator.generateValuesForColumns((int) latValue, (int) lonValue, (int) depthValue, 1, fileNumber);
                 float generatedVar2Value = NetcdfTestFilesCreator.generateValuesForColumns((int) latValue, (int) lonValue, (int) depthValue, 2, fileNumber);
 
-                if (generatedVar1Value != var1value || generatedVar2Value != var2value)
+                countMap[fileNumber][(int) depthValue][(int) latValue][(int) lonValue]++;
+
+                if (generatedVar1Value != var1value || generatedVar2Value != var2value) {
+                    System.out.println("It appears (at least) a row is incorrect");
                     return false;
+                }
 
             }
-            return true;
+            return isCountMapCorrect();
 
         } catch (IOException e) {
             e.printStackTrace();
             System.out.println("Error happened while reading the csv file, test won't continue");
             return false;
         }
+    }
+
+    private static boolean isCountMapCorrect(){
+        for(int[][][] fileData: countMap)
+            for(int[][] matrixData: fileData)
+                for(int[] rowData: matrixData)
+                    for(int cellCount: rowData) {
+                        if (cellCount == 0) {
+                            System.out.println("There is (at least) some data not found in the file");
+                        } else if(cellCount > 1){
+                            System.out.println("There is (at least) some data duplicated in the file");
+                        }
+                        if(cellCount != 1)
+                            return false;
+                    }
+
+        return true;
     }
 
 
