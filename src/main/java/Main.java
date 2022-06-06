@@ -10,6 +10,9 @@ public class Main {
     //TODO: aggiorna gli indirizzi hardcoded
     //TODO: aggiungi un blocco del programma nel main se alcune ipotesi fondamentali falliscono
 
+    public static ExecutorService externalExecutorService = null;
+    public static PostWritingPhaseManager externalPostWritingPhaseManager = null;
+
     public static void main(String[] args) {
 
         System.out.println("Remember to set correctly the maxHeapSize");
@@ -19,26 +22,35 @@ public class Main {
         String headerFileFullPath;
         String[] variablesNames;
 
+
+        InfoLogger logCollector = new InfoLoggerCollector(instantiateLoggers());
+
         ncFilesPaths = getNcFilesPaths(args.length < 1 ? getConfigFileFullPath() : args[0]);
         outputFileFullPath = args.length < 2 ? getOutputFileFullPath() : args[1];
         headerFileFullPath = args.length < 3 ? getHeaderFileFullPath() : args[2];
         variablesNames = getVariablesNames(args.length < 4 ? get4DNamesConfigFileFullPath() : args[3]);
 
-        InfoLogger logCollector = new InfoLoggerCollector(instantiateLoggers());
+
+        int nOfActiveThreads = PoolSizeCalculator.getPoolSize(ncFilesPaths, logCollector);
+        nOfActiveThreads = Math.min(nOfActiveThreads, ncFilesPaths.size());
+
+        ExecutorService executorService = externalExecutorService == null ?
+                Executors.newFixedThreadPool(nOfActiveThreads) : externalExecutorService;
 
         HeaderFileWriter headerFileWriter = new HeaderCsvWriter(logCollector, headerFileFullPath);
 
 
-        int nOfActiveThreads = PoolSizeCalculator.getPoolSize(ncFilesPaths, logCollector);
-        nOfActiveThreads = Math.min(nOfActiveThreads, ncFilesPaths.size());
-        //nOfActiveThreads = 1;
-        ExecutorService executorService = Executors.newFixedThreadPool(nOfActiveThreads);
-
         //TODO: VA BENE?
-        Thread temporaryPostWritingPhaseManager = new ResourceCloser(logCollector, executorService);
-        temporaryPostWritingPhaseManager.start();
-        PostWritingPhaseManager postWritingPhaseManager = (PostWritingPhaseManager) temporaryPostWritingPhaseManager;
-        //
+
+        PostWritingPhaseManager postWritingPhaseManager;
+        if (externalPostWritingPhaseManager == null) {
+            Thread temporaryPostWritingPhaseManager = new ResourceCloser(logCollector, executorService);
+            temporaryPostWritingPhaseManager.start();
+            postWritingPhaseManager = (PostWritingPhaseManager) temporaryPostWritingPhaseManager;
+        } else {
+            postWritingPhaseManager = externalPostWritingPhaseManager;
+        }
+
 
         AsynchronousOutputFileWriter outputFileWriter = new CsvWriterFromData(logCollector, outputFileFullPath,
                 postWritingPhaseManager, ncFilesPaths, variablesNames,
@@ -55,6 +67,7 @@ public class Main {
                 logCollector, asynchronousFilesValidityCollector, asynchronousFailedFilesManager, headerFileWriter);
 
     }
+
 
     private static InfoLogger[] instantiateLoggers() {
 

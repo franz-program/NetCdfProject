@@ -12,7 +12,7 @@ import java.util.concurrent.TimeUnit;
 
 public class CsvWriterFromData extends Thread implements AsynchronousOutputFileWriter {
 
-    private final BlockingQueue<DataGetter> fileDataQueue = new LinkedBlockingQueue<>(2);
+    private final BlockingQueue<DataGetter> fileDataQueue = new LinkedBlockingQueue<>(1);
     private final List<String> sourceFiles;
     private final InfoLogger infoLogger;
     private final PostWritingPhaseManager postWritingPhaseManager;
