@@ -14,6 +14,7 @@ public class WritingOnOutputFileTester {
     private static final String configFileNameFor4DVars = "4DVarsNames.txt";
     private static final String outputFileName = "outputFileForTest.csv";
     private static final String headerFileName = "headerFileForTest.csv";
+    private static final String logFileName = "logFile.txt";
 
     private static final String netcdfTestFilesPrefix = "testFile";
     private static final int nOfNetcdfTestFiles = 5;
@@ -47,7 +48,8 @@ public class WritingOnOutputFileTester {
         Main.main(new String[]{testFilesFolder + File.separator + configFileNameForNetcdfPaths,
                 testFilesFolder + File.separator + outputFileName,
                 testFilesFolder + File.separator + headerFileName,
-                testFilesFolder + File.separator + configFileNameFor4DVars});
+                testFilesFolder + File.separator + configFileNameFor4DVars,
+                testFilesFolder + File.separator + logFileName});
 
         if (runningOnWindows)
             waitUntilOutputFileIsClosed();
