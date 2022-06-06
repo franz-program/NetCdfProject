@@ -3,23 +3,36 @@ import java.util.concurrent.Executors;
 
 public class TimeTester implements PostWritingPhaseManager {
 
-    private static final String configFilePathForInputFiles = null;
-    private static final String configFilePathForWantedVarNames = null;
-    private static final String outputFileFullPath = null;
-    private static final String headerFileFullPath = null;
+    private static String configFilePathForInputFiles;
+    private static String configFilePathForWantedVarNames;
+    private static String outputFileFullPath;
+    private static String headerFileFullPath;
+    private static String logFileFullPath;
 
 
-    private static final int nOfTestsPerPoolSize = 5;
-
+    private static final int nOfTestsPerPoolSize = 3;
 
     public static void main(String[] args) {
 
+        System.out.println("Remember to set the max heap size");
 
-        int maxNOfThreads = Runtime.getRuntime().availableProcessors() - 1;
+        if (args.length < 5) {
+            System.out.printf("ARGUMENTS REQUIRED: %n0) path of txt file containing paths of netcdf files (one per row)%n");
+            System.out.printf("1) path of txt file containing netcdf var names%n2) any path for the output file (csv)%n");
+            System.out.printf("3) any path for header file (csv)%n4) any path for log file (txt)%n");
+            return;
+        }
+
+        configFilePathForInputFiles = args[0];
+        configFilePathForWantedVarNames = args[1];
+        outputFileFullPath = args[2];
+        headerFileFullPath = args[3];
+        logFileFullPath = args[4];
+
+        int maxNOfThreads = 10;
 
         for (int i = 1; i <= maxNOfThreads; i++)
             processTimeTestWithFixedPoolSize(i);
-        
 
     }
 
@@ -34,8 +47,8 @@ public class TimeTester implements PostWritingPhaseManager {
 
             Main.externalPostWritingPhaseManager = controllerIfSwHasFinished;
             Main.externalExecutorService = executorService;
-            Main.main(new String[]{configFilePathForInputFiles, configFilePathForWantedVarNames,
-                    outputFileFullPath, headerFileFullPath});
+            Main.main(new String[]{configFilePathForInputFiles, outputFileFullPath,
+                    headerFileFullPath, configFilePathForWantedVarNames, logFileFullPath});
 
             synchronized (controllerIfSwHasFinished) {
                 try {
@@ -52,10 +65,6 @@ public class TimeTester implements PostWritingPhaseManager {
         System.out.printf("Pool size %d, avg time in seconds: %d%n", poolSize, avgTimeInS);
 
     }
-
-
-
-
 
 
     private final ExecutorService executorService;

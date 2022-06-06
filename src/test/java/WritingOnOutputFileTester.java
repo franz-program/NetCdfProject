@@ -6,6 +6,10 @@ import java.util.*;
 public class WritingOnOutputFileTester {
 
     private static String testFilesFolder = "D:\\UNIVERSITA'\\TESI\\folderForTestingTheSystem";
+
+
+
+
     private static final String configFileNameForNetcdfPaths = "inputFilesListsForTest.txt";
     private static final String configFileNameFor4DVars = "4DVarsNames.txt";
     private static final String outputFileName = "outputFileForTest.csv";
@@ -16,11 +20,12 @@ public class WritingOnOutputFileTester {
     private static final String[] netcdfTestFilesNames = inizializeNetcdfFilesNames();
     private static int[][][][] countMap;
 
+
     public static void main(String[] args) {
 
         countMap = new int[nOfNetcdfTestFiles][NetcdfTestFilesCreator.DEPTH_DIM_LENGTH][NetcdfTestFilesCreator.LAT_DIM_LENGTH][NetcdfTestFilesCreator.LON_DIM_LENGTH];
 
-        if (args.length <= 0)
+        if (args.length == 0)
             throw new IllegalArgumentException("Put any folder's path for the test files, as the first argument (no last separator needed)");
 
         testFilesFolder = args[0];

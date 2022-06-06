@@ -15,21 +15,22 @@ public class Main {
 
     public static void main(String[] args) {
 
-        System.out.println("Remember to set correctly the maxHeapSize");
+        //System.out.println("Remember to set correctly the maxHeapSize");
 
         List<String> ncFilesPaths;
         String outputFileFullPath;
         String headerFileFullPath;
         String[] variablesNames;
+        String logFileFullPath;
 
-
-        InfoLogger logCollector = new InfoLoggerCollector(instantiateLoggers());
 
         ncFilesPaths = getNcFilesPaths(args.length < 1 ? getConfigFileFullPath() : args[0]);
         outputFileFullPath = args.length < 2 ? getOutputFileFullPath() : args[1];
         headerFileFullPath = args.length < 3 ? getHeaderFileFullPath() : args[2];
         variablesNames = getVariablesNames(args.length < 4 ? get4DNamesConfigFileFullPath() : args[3]);
+        logFileFullPath = args.length < 5 ? getLogFileFullPath() : args[4];
 
+        InfoLogger logCollector = new InfoLoggerCollector(instantiateLoggers(logFileFullPath));
 
         int nOfActiveThreads = PoolSizeCalculator.getPoolSize(ncFilesPaths, logCollector);
         nOfActiveThreads = Math.min(nOfActiveThreads, ncFilesPaths.size());
@@ -69,10 +70,10 @@ public class Main {
     }
 
 
-    private static InfoLogger[] instantiateLoggers() {
+    private static InfoLogger[] instantiateLoggers(String logFileFullPath) {
 
         InfoLogger[] loggers = new InfoLogger[2];
-        loggers[0] = new InfoLoggerOnTxtFile(getLogFileFullPath());
+        loggers[0] = new InfoLoggerOnTxtFile(logFileFullPath);
         loggers[1] = new InfoLoggerOnStdOutput(LogLevel.WARNING);
 
         return loggers;
