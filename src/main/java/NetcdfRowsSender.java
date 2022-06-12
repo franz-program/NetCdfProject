@@ -65,7 +65,7 @@ public class NetcdfRowsSender implements Runnable {
             return;
         }
 
-        Object[] row = new Object[columnsNames.length];
+
 
         //TODO: evita che ci sia l'ordine statico time-depth-lat-lon
         for (int i = 0; i < depthData.getSize(); i++) {
@@ -73,6 +73,8 @@ public class NetcdfRowsSender implements Runnable {
             for (int j = 0; j < latData.getSize(); j++) {
                 float latValue = latData.get(j);
                 for (int k = 0; k < lonData.getSize(); k++) {
+
+                    Object[] row = new Object[columnsNames.length];
 
                     row[timeColumnPosition] = timeStringRepresentation;
                     row[depthColumnPosition] = depthValue;

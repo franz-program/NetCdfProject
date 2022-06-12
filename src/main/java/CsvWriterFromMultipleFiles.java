@@ -11,7 +11,7 @@ import java.util.concurrent.TimeUnit;
 
 public class CsvWriterFromMultipleFiles extends Thread implements NetcdfRowsManager {
 
-    private final BlockingQueue<Object[]> rowsQueue = new LinkedBlockingQueue<>();
+    private final BlockingQueue<Object[]> rowsQueue = new LinkedBlockingQueue<>((int) Math.pow(10, 7));
     private List<String> activeFiles;
     private final List<String> filesWhichFailed = new ArrayList<>();
     private final InfoLogger infoLogger;

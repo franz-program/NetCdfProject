@@ -18,6 +18,7 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
     private final InfoLogger infoLogger;
     private AsynchronousFailedFilesManager asynchronousFailedFilesManager;
     private AsynchronousHeaderFileWriter asynchronousHeaderFileWriter;
+    private final String[] columnNames;
 
     private List<String> netcdfFilesNames;
     private List<String> failedPreprocessNetcdfFiles = new ArrayList<>();
@@ -30,7 +31,7 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
     public NetcdfDataAggregatorV1(NetcdfRowsManager asynchronousTableWriter, InfoLogger infoLogger,
                                   List<String> netcdfFilesNames, AsynchronousFailedFilesManager asynchronousFailedFilesManager,
                                   AsynchronousHeaderFileWriter asynchronousHeaderFileWriter,
-                                  ExecutorService executorService) {
+                                  ExecutorService executorService, String[] columnNames) {
 
         this.asynchronousTableWriter = asynchronousTableWriter;
         this.infoLogger = infoLogger;
@@ -38,6 +39,7 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
         this.asynchronousFailedFilesManager = asynchronousFailedFilesManager;
         this.asynchronousHeaderFileWriter = asynchronousHeaderFileWriter;
         this.executorService = executorService;
+        this.columnNames = columnNames;
 
     }
 
@@ -54,8 +56,6 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
         asynchronousFailedFilesManager.setFailedFilesNames(failedPreprocessNetcdfFiles);
         new Thread(asynchronousFailedFilesManager).start();
 
-
-        String[] columnNames = getColumnNames(dependentColumnsInfo);
 
         asynchronousTableWriter.setColumnNames(columnNames);
         asynchronousTableWriter.setSourceNames(netcdfFilesNames);
@@ -146,21 +146,6 @@ public class NetcdfDataAggregatorV1 implements NetcdfDataAggregator {
             if (!listWhereToAdd.contains(columnInfo))
                 listWhereToAdd.add(columnInfo);
         }
-    }
-
-    private String[] getColumnNames(List<ColumnInfo> dependentColumnsInfo) {
-
-        String[] depNames = dependentColumnsInfo.stream().map(ColumnInfo::getName).toArray(String[]::new);
-        String[] columnNames = new String[4 + depNames.length];
-        columnNames[0] = ClassForCostants.timeVarName;
-        columnNames[1] = ClassForCostants.depthVarName;
-        columnNames[2] = ClassForCostants.latVarName;
-        columnNames[3] = ClassForCostants.lonVarName;
-
-        for (int i = 4; i < columnNames.length; i++) {
-            columnNames[i] = depNames[i - 4];
-        }
-        return columnNames;
     }
 
     private void startReadingNetcdfFiles(String[] columnNames) {
